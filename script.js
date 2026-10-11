@@ -184,7 +184,7 @@ const videoData = [
 
 function getConfiguredVideos() {
   return videoData
-    .filter(video => video.uid || (isLocalVideoPreview && video.src))
+    .filter(video => video.uid || video.poster || (isLocalVideoPreview && video.src))
     .map(video => {
       if (!video.uid) return video;
       return {
@@ -206,7 +206,7 @@ function openVideoModal(video) {
     player.allow = 'accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen';
     player.allowFullscreen = true;
     videoPlayer.replaceChildren(player);
-  } else {
+  } else if (isLocalVideoPreview && video.src) {
     const player = document.createElement('video');
     player.className = 'local-video-player';
     player.controls = true;
@@ -215,7 +215,15 @@ function openVideoModal(video) {
     player.preload = 'metadata';
     player.src = video.src;
     player.setAttribute('aria-label', video.title);
+    player.addEventListener('error', () => {
+      $('#video-error-message').textContent = 'Le fichier vidéo local est introuvable ou son format ne peut pas être lu. Vérifie son chemin dans videoData.';
+      $('#video-error-message').hidden = false;
+    }, { once: true });
     videoPlayer.replaceChildren(player);
+  } else {
+    videoPlayer.replaceChildren();
+    $('#video-error-message').textContent = 'La vignette est publiée, mais la vidéo doit être hébergée sur Cloudflare Stream. Ajoute son UID dans videoData pour activer la lecture en ligne.';
+    $('#video-error-message').hidden = false;
   }
   const downloadLink = $('#download-video');
   downloadLink.href = video.downloadUrl || video.src || '#';
@@ -253,7 +261,7 @@ function renderVideo(video) {
     image.className = 'video-poster-image';
     image.src = video.poster;
     image.alt = '';
-    image.loading = 'lazy';
+    image.loading = 'eager';
     poster.append(image);
   } else if (video.src) {
     const preview = document.createElement('video');
@@ -289,7 +297,7 @@ function renderVideo(video) {
 const configuredVideos = getConfiguredVideos();
 configuredVideos.forEach(renderVideo);
 if (!configuredVideos.length) {
-  videoLibraryMessage.textContent = 'Les prochaines vidéos apparaîtront ici après ajout de leur UID Cloudflare dans videoData.';
+  videoLibraryMessage.textContent = 'Ajoute une vidéo dans le tableau videoData pour la faire apparaître ici.';
 }
 
 $('#close-video').addEventListener('click', closeVideoModal);
