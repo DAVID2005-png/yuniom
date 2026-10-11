@@ -160,44 +160,50 @@ applicationForm.addEventListener('submit', event => {
   applicationMessage.textContent = 'Votre message est prêt dans WhatsApp. Vérifiez-le puis envoyez-le.';
 });
 
-const videoData = [
-  {
-    src: 'videos/JAGUAMAN_-__CONGO_KINSHASA___clip_officiel_(1080p).mp4',
-    poster: 'videos/posters/jaguaman.jpg',
-    title: 'Jaguaman - Congo Kinshasa',
-    category: 'Clip musical'
-  },
-  {
-    src: 'videos/POP_CHINOIS_feat_DINHO_LA_MAGIE___JOJO_FLEX_-_TANZU_DRILL___Officiel_vidéo__4K(1080p).mp4',
-    poster: 'videos/posters/pop-chinois.jpg',
-    title: 'Pop Chinois feat. Dinho La Magie - Jojo Flex',
-    category: 'Clip musical'
-  }
-];
 const videoList = $('#video-list');
 const videoModal = $('#video-modal');
 const videoPlayer = $('#video-player');
+const videoLibraryMessage = $('#video-library-message');
+const localVideoFallback = [
+  { src: 'videos/JAGUAMAN_-__CONGO_KINSHASA___clip_officiel_(1080p).mp4', poster: 'videos/posters/jaguaman.jpg', title: 'Jaguaman - Congo Kinshasa', category: 'Clip musical' },
+  { src: 'videos/POP_CHINOIS_feat_DINHO_LA_MAGIE___JOJO_FLEX_-_TANZU_DRILL___Officiel_vidéo__4K(1080p).mp4', poster: 'videos/posters/pop-chinois.jpg', title: 'Pop Chinois feat. Dinho La Magie - Jojo Flex', category: 'Clip musical' }
+];
+const videoManager = $('#video-manager');
+const videoUploadForm = $('#video-upload-form');
+const videoUploadStatus = $('#video-upload-status');
+const videoUploadProgress = $('#video-upload-progress');
+const uploadVideoButton = $('#upload-video-button');
+let activeUploadPassword = '';
+
+function setVideoStatus(message) {
+  videoUploadStatus.textContent = message;
+}
 
 function openVideoModal(video) {
   $('#video-modal-title').textContent = video.title;
-  const player = document.createElement('video');
-  player.className = 'local-video-player';
-  player.controls = true;
-  player.autoplay = true;
-  player.playsInline = true;
-  player.preload = 'metadata';
-  player.src = video.src;
-  player.setAttribute('aria-label', video.title);
-  player.addEventListener('error', () => {
-    const message = $('#video-error-message');
-    message.textContent = 'Ce fichier ne peut pas être lu par ce navigateur. Convertissez-le en MP4 H.264/AAC, puis réessayez.';
-    message.hidden = false;
-  }, { once: true });
   $('#video-error-message').hidden = true;
-  videoPlayer.replaceChildren(player);
+  if (video.playbackUrl) {
+    const player = document.createElement('iframe');
+    player.src = `${video.playbackUrl}?autoplay=true&preload=true`;
+    player.title = video.title;
+    player.allow = 'accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen';
+    player.allowFullscreen = true;
+    videoPlayer.replaceChildren(player);
+  } else {
+    const player = document.createElement('video');
+    player.className = 'local-video-player';
+    player.controls = true;
+    player.autoplay = true;
+    player.playsInline = true;
+    player.preload = 'metadata';
+    player.src = video.src;
+    player.setAttribute('aria-label', video.title);
+    videoPlayer.replaceChildren(player);
+  }
   const downloadLink = $('#download-video');
-  downloadLink.href = video.src;
-  downloadLink.download = video.src.split('/').pop();
+  downloadLink.href = video.downloadUrl || video.src || '#';
+  downloadLink.download = video.src ? video.src.split('/').pop() : '';
+  downloadLink.hidden = !video.downloadUrl && !video.src;
   downloadLink.setAttribute('aria-label', `Télécharger ${video.title}`);
   videoModal.classList.add('active');
   videoModal.setAttribute('aria-hidden', 'false');
@@ -210,11 +216,12 @@ function closeVideoModal() {
   videoModal.classList.remove('active');
   videoModal.setAttribute('aria-hidden', 'true');
   videoPlayer.replaceChildren();
+  $('#download-video').hidden = true;
   $('#video-error-message').hidden = true;
   document.body.classList.remove('modal-open');
 }
 
-videoData.forEach(video => {
+function renderVideo(video) {
   const card = document.createElement('article');
   card.className = 'video-card';
   const playButton = document.createElement('button');
@@ -231,7 +238,7 @@ videoData.forEach(video => {
     image.alt = '';
     image.loading = 'lazy';
     poster.append(image);
-  } else {
+  } else if (video.src) {
     const preview = document.createElement('video');
     preview.className = 'video-preview';
     preview.src = video.src;
@@ -261,7 +268,130 @@ videoData.forEach(video => {
   meta.append(category, title);
   card.append(playButton, meta);
   videoList.append(card);
+}
+
+async function loadStreamVideos() {
+  videoList.replaceChildren();
+  videoLibraryMessage.textContent = '';
+  try {
+    const response = await fetch('/api/videos');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Le service vidéo est indisponible.');
+    data.videos.forEach(renderVideo);
+    if (!data.videos.length) videoLibraryMessage.textContent = 'Aucune vidéo publiée pour le moment.';
+  } catch (error) {
+    if (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) {
+      localVideoFallback.forEach(renderVideo);
+      videoLibraryMessage.textContent = 'Aperçu local : les vidéos locales ne seront pas publiées sur Vercel. Configure Cloudflare Stream pour les mises en ligne.';
+      return;
+    }
+    videoLibraryMessage.textContent = error.message || 'La bibliothèque vidéo est momentanément indisponible.';
+  }
+}
+
+function encodeTusValue(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+}
+
+async function getTusOffset(uploadUrl) {
+  const response = await fetch(uploadUrl, { method: 'HEAD', headers: { 'Tus-Resumable': '1.0.0' } });
+  if (!response.ok) throw new Error('Impossible de reprendre l’envoi. Recommence l’import.');
+  return Number(response.headers.get('Upload-Offset') || 0);
+}
+
+async function uploadTusFile(file, uploadUrl, key) {
+  const chunkSize = 50 * 1024 * 1024;
+  let offset = await getTusOffset(uploadUrl);
+  let retryCount = 0;
+  while (offset < file.size) {
+    const end = Math.min(offset + chunkSize, file.size);
+    try {
+      const response = await fetch(uploadUrl, {
+        method: 'PATCH',
+        headers: {
+          'Tus-Resumable': '1.0.0',
+          'Upload-Offset': String(offset),
+          'Content-Type': 'application/offset+octet-stream'
+        },
+        body: file.slice(offset, end)
+      });
+      if (!response.ok) throw new Error(`Échec du bloc vidéo (${response.status}).`);
+      offset = Number(response.headers.get('Upload-Offset') || end);
+      retryCount = 0;
+      sessionStorage.setItem(key, uploadUrl);
+      const progress = Math.min(100, Math.floor((offset / file.size) * 100));
+      videoUploadProgress.value = progress;
+      setVideoStatus(`Envoi en cours : ${progress} %`);
+    } catch (error) {
+      retryCount += 1;
+      if (retryCount > 5) throw new Error('Connexion interrompue. Tu peux sélectionner de nouveau ce fichier pour reprendre l’envoi.');
+      await new Promise(resolve => setTimeout(resolve, Math.min(retryCount * 1500, 8000)));
+      offset = await getTusOffset(uploadUrl);
+    }
+  }
+  sessionStorage.removeItem(key);
+}
+
+$('#toggle-video-manager').addEventListener('click', () => {
+  const isOpening = videoManager.hidden;
+  videoManager.hidden = !isOpening;
+  $('#toggle-video-manager').setAttribute('aria-expanded', String(isOpening));
 });
+
+videoUploadForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!videoUploadForm.reportValidity()) return;
+  const file = $('#video-file').files[0];
+  const title = $('#video-title').value.trim();
+  const durationSeconds = Math.ceil(Number($('#video-duration-hours').value) * 3600);
+  const adminPassword = $('#video-admin-password').value;
+  const uploadKey = `yuniom-tus:${file.name}:${file.size}:${file.lastModified}`;
+  uploadVideoButton.disabled = true;
+  videoUploadProgress.hidden = false;
+  videoUploadProgress.value = 0;
+
+  try {
+    let uploadUrl = sessionStorage.getItem(uploadKey);
+    if (uploadUrl) {
+      try {
+        const offset = await getTusOffset(uploadUrl);
+        setVideoStatus(`Reprise de l’envoi à ${Math.floor((offset / file.size) * 100)} %…`);
+      } catch {
+        sessionStorage.removeItem(uploadKey);
+        uploadUrl = null;
+      }
+    }
+
+    if (!uploadUrl) {
+      setVideoStatus('Préparation de l’envoi sécurisé…');
+      const response = await fetch('/api/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminPassword}` },
+        body: JSON.stringify({ title, fileSize: file.size, contentType: file.type || 'application/octet-stream', maxDurationSeconds: durationSeconds })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Impossible de préparer l’import.');
+      uploadUrl = data.uploadUrl;
+      sessionStorage.setItem(uploadKey, uploadUrl);
+    }
+
+    await uploadTusFile(file, uploadUrl, uploadKey);
+    videoUploadProgress.value = 100;
+    setVideoStatus('Envoi terminé. Cloudflare prépare la lecture; la vidéo apparaîtra dans la bibliothèque après encodage.');
+    videoUploadForm.reset();
+    $('#video-duration-hours').value = '2';
+    await loadStreamVideos();
+  } catch (error) {
+    setVideoStatus(error.message || 'Échec de l’import.');
+  } finally {
+    uploadVideoButton.disabled = false;
+  }
+});
+
+loadStreamVideos();
 
 $('#close-video').addEventListener('click', closeVideoModal);
 videoModal.addEventListener('click', event => {

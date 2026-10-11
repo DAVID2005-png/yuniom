@@ -1,1 +1,3 @@
 videos/*.mp4
+.env*
+!.env.example

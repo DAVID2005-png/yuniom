@@ -8,11 +8,16 @@ L’aperçu du téléphone reprend l’interface mobile de votre capture : thèm
 
 Les formulaires et boutons sont des démonstrations front-end. Aucune base de données, authentification ou fonctionnalité de paiement n’est connectée.
 
-AJOUTER DES VIDÉOS LOCALES
+VIDÉOS LONGUES ET IMPORTS
 
-1. Copiez le fichier vidéo dans videos/ et une image de vignette JPG dans videos/posters/.
-2. Dans script.js, ajoutez un objet dans videoData :
-	{ src: 'videos/ma-video.mp4', poster: 'videos/posters/ma-video.jpg', title: 'Mon titre', category: 'Formation' }
-3. Enregistrez puis rechargez index.html. La vignette montre l’image choisie; un clic lance la vidéo dans le lecteur du site et le bouton Télécharger récupère le fichier.
+La galerie publique lit les vidéos depuis Cloudflare Stream. Pour activer les imports sur Vercel :
 
-Les deux vidéos actuellement fournies sont en MP4 H.264/AAC. Pour les prochains fichiers, ce format offre une bonne compatibilité sur ordinateur et mobile. Le site statique ne peut pas détecter automatiquement les nouveaux fichiers ajoutés au dossier : chaque vidéo et son image de vignette doivent être déclarées dans videoData.
+1. Activez Cloudflare Stream et créez un jeton API ayant les permissions Stream Read et Stream Write.
+2. Dans les paramètres Vercel du projet, ajoutez CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_STREAM_TOKEN et VIDEO_ADMIN_PASSWORD. Gardez le jeton et le mot de passe secrets; ne les mettez jamais dans le code.
+3. Redéployez le projet. Ouvrez la section Vidéos, cliquez sur Gérer les vidéos, entrez le code administrateur, choisissez un titre, une durée maximale et un fichier, puis lancez l’import.
+
+Le navigateur envoie le fichier par blocs TUS directement à Cloudflare, avec progression et reprise après interruption. Cloudflare transcode les entrées vidéo compatibles vers ses formats de streaming et génère la vignette. La bibliothèque ajoute les vidéos après la fin de leur traitement.
+
+Limites importantes : Cloudflare Stream limite la durée maximale configurée à 10 heures par vidéo; le service et le trafic vidéo sont payants selon le tarif Cloudflare. « Tous les formats » n’est pas garanti : les formats vidéo courants sont pris en charge, mais un fichier rejeté par Stream devra être converti. Les téléchargements MP4 nécessitent que l’option de téléchargement soit activée sur Cloudflare Stream.
+
+Les MP4 déposés dans videos/ restent des fichiers de développement locaux et sont exclus de GitHub. Ils ne sont pas nécessaires aux nouveaux imports Cloudflare.
